@@ -148,10 +148,11 @@ headers of the chunked stream \(if any) as a second value."
                         'octet))
         (chunkedp (chunked-stream-input-chunking-p (flexi-stream-stream stream))))
     (values (cond ((eql content-length 0) nil)
-                  (content-length
-                   (when chunkedp
-                     ;; see RFC 2616, section 4.4
-                     (syntax-error "Got Content-Length header although input chunking is on."))
+                  ;; be more tolerant here
+                  ;; according to http://tools.ietf.org/html/rfc2616#section-4.4
+                  ;; if Transfer-Encoding
+                  ;; is present (and it's not identity) we must ignore content-length
+                  ((and content-length (not chunkedp)) 
                    (setf (flexi-stream-element-type stream) 'octet)
                    (let ((result (make-array content-length :element-type 'octet)))
                      #+:clisp
