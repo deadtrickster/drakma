@@ -38,27 +38,24 @@
 
 (in-package :drakma-asd)
 
-(defvar *drakma-version-string* "1.3.4"
-  "Drakma's version number as a string.")
-
-;; we export its name so we can import it later
-(export '*drakma-version-string*)
-
 (defsystem :drakma
   :description "Full-featured http/https client based on usocket"
   :serial t
-  :version #.*drakma-version-string*
+  :version "1.3.10"
   :components ((:file "packages")
                (:file "specials")
                (:file "conditions")
                (:file "util")
                (:file "read")
                (:file "cookies")
+               (:file "encoding")
                (:file "request"))
   :depends-on (:puri
                :cl-base64
                :chunga
                :flexi-streams
                :cl-ppcre
+               :ia-hash-table
+               #-:drakma-no-chipz :chipz
                #-:lispworks :usocket
-               #-(or :lispworks :allegro :drakma-no-ssl) :cl+ssl))
+               #-(or :lispworks :allegro :mocl-ssl :drakma-no-ssl) :cl+ssl))

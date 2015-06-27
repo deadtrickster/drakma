@@ -129,7 +129,7 @@ value with a #\\= character.  If the value is NIL, no #\\= is used."
 (defun default-port (uri)
   "Returns the default port number for the \(PURI) URI URI.
 Works only with the http and https schemes."
-  (ecase (uri-scheme uri)
+  (ecase (puri:uri-scheme uri)
     (:http 80)
     (:https 443)))
 
@@ -137,7 +137,7 @@ Works only with the http and https schemes."
   "If the \(PURI) URI specifies an explicit port number which is
 different from the default port its scheme, this port number is
 returned, otherwise NIL."
-  (when-let (port (uri-port uri))
+  (when-let (port (puri:uri-port uri))
     (when (/= port (default-port uri))
       port)))
 
@@ -148,7 +148,7 @@ Returns TOKEN itself otherwise."
   (case token
     (:drakma
      (format nil "Drakma/~A (~A~@[ ~A~]; ~A;~@[ ~A;~] http://weitz.de/drakma/)"
-             *drakma-version-string*
+             *drakma-version*
              (or (lisp-implementation-type) "Common Lisp")
              (or (lisp-implementation-version) "")
              (or #-:clisp (software-type)
@@ -170,7 +170,7 @@ Returns TOKEN itself otherwise."
 and NAME is a keyword naming a header, this function returns the
 corresponding value of this header \(or NIL if it's not in
 HEADERS)."
-  (cdr (assoc name headers :test #'eq)))
+  (cdr (assoc name headers :test #'ia-hash-table:string-equalp)))
 
 (defun parameter-present-p (name parameters)
   "If PARAMETERS is an alist of parameters as returned by, for
@@ -305,7 +305,7 @@ which are not meant as separators."
          (go next-cookie))))))
 
 #-:lispworks
-(defun make-ssl-stream (http-stream &key certificate key certificate-password verify (max-depth 10) ca-file ca-directory)
+(defun make-ssl-stream (http-stream &key certificate key certificate-password verify (max-depth 10) ca-file ca-directory hostname)
   "Attaches SSL to the stream HTTP-STREAM and returns the SSL stream
 \(which will not be equal to HTTP-STREAM)."
   (declare (ignorable max-depth))
@@ -328,7 +328,12 @@ which are not meant as separators."
                                  :max-depth max-depth
                                  :ca-file ca-file
                                  :ca-directory ca-directory)
-  #+(and (not :allegro) (not :drakma-no-ssl))
+  #+(and :mocl-ssl (not :drakma-no-ssl))
+  (progn
+    (when (or ca-file ca-directory)
+      (warn ":max-depth, :ca-file and :ca-directory arguments not available on this platform"))
+    (rt:start-ssl http-stream :verify verify))
+  #+(and (not :allegro) (not :mocl-ssl) (not :drakma-no-ssl))
   (let ((s http-stream))
     (when (or verify ca-file ca-directory)
       (warn ":verify, :max-depth, :ca-file and :ca-directory arguments not available on this platform"))
@@ -337,7 +342,8 @@ which are not meant as separators."
      :close-callback (lambda () (close s))
      :certificate certificate
      :key key
-     :password certificate-password))
+     :password certificate-password
+     :hostname hostname))
   #+:drakma-no-ssl
   (error "SSL not supported. Remove :drakma-no-ssl from *features* to enable SSL"))
 
