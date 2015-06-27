@@ -127,6 +127,10 @@ body using the boundary BOUNDARY."
       (crlf))))
 
 (defun %read-body (stream element-type)
+  ;; On ABCL, a flexi-stream is not a normal stream. This is caused by
+  ;; a bug in ABCL which is supposedly quite difficult to fix. More
+  ;; details here: http://abcl.org/trac/ticket/377
+  #-abcl
   (declare (stream stream))
   "Helper function to read from stream into a buffer of element-type, which is returned."
   (let ((buffer (make-array +buffer-size+ :element-type element-type))
@@ -138,7 +142,7 @@ body using the boundary BOUNDARY."
            while (= pos +buffer-size+))
         result))
 
-(defun read-body (stream headers textp)
+(defun read-body (stream headers textp &key (decode-content t))
   "Reads the message body from the HTTP stream STREAM using the
 information contained in HEADERS \(as produced by HTTP-REQUEST).  If
 TEXTP is true, the body is assumed to be of content type `text' and
@@ -163,7 +167,7 @@ headers of the chunked stream \(if any) as a second value."
                      #+:clisp
                      (setf (flexi-stream-element-type stream) 'octet)
                      (read-sequence result stream)
-                     (when (header-value :content-encoding headers)
+                     (when (and decode-content (header-value :content-encoding headers))
                        (setq result (with-input-from-sequence (s result)
                                       (%read-body (decode-response-stream headers s) 'octet))))
                      (when textp
@@ -176,7 +180,9 @@ headers of the chunked stream \(if any) as a second value."
                    ;; no content length, read until EOF (or end of chunking)
                    #+:clisp
                    (setf (flexi-stream-element-type stream) element-type)
-                   (%read-body (decode-flexi-stream headers stream) element-type)))
+                   (%read-body (decode-flexi-stream headers stream
+                                                    :decode-content decode-content)
+                               element-type)))
             (chunked-input-stream-trailers (flexi-stream-stream stream)))))
 
 (defun trivial-uri-path (uri-string)
@@ -222,6 +228,7 @@ headers of the chunked stream \(if any) as a second value."
                               want-stream
                               stream
                               preserve-uri
+                              decode-content ; default to nil for backwards compatibility
                               #+(or abcl clisp lispworks mcl openmcl sbcl)
                               (connection-timeout 20)
                               #+:lispworks (read-timeout 20)
@@ -379,7 +386,7 @@ If PROXY is not NIL, it should be a string denoting a proxy
 server through which the request should be sent.  Or it can be a
 list of two values - a string denoting the proxy server and an
 integer denoting the port to use \(which will default to 80
-otherwise).  Defaults to *default-http-proxy*. 
+otherwise).  Defaults to *default-http-proxy*.
 PROXY-BASIC-AUTHORIZATION is used like
 BASIC-AUTHORIZATION, but for the proxy, and only if PROXY is
 true. If the host portion of the uri is present in the
@@ -467,7 +474,13 @@ means that the URI will be sent as-is to the remote server and it is
 the responsibility of the client to make sure that all parameters are
 encoded properly. Note that if this parameter is given, and the
 request is not a POST with a content-type of `multipart/form-data',
-PARAMETERS will not be used."
+PARAMETERS will not be used.
+
+If DECODE-CONTENT is not NIL, then the content will automatically be
+decoded according to any encodings specified in the Content-Encoding
+header. The actual decoding is done by the DECODE-STREAM generic function,
+and you can implement new methods to support additional encodings.
+Any encodings in Transfer-Encoding, such as chunking, are always performed."
   #+lispworks
   (declare (ignore certificate key certificate-password verify max-depth ca-file ca-directory))
   (unless (member protocol '(:http/1.0 :http/1.1) :test #'eq)
@@ -643,8 +656,10 @@ PARAMETERS will not be used."
                                                              (not real-host))
                                                         uri
                                                         (make-instance 'puri:uri
-                                                                       :path (or (puri:uri-path uri) "/")
-                                                                       :query (puri:uri-query uri)))
+                                                                       :path (puri:uri-path uri)
+                                                                       :parsed-path (puri:uri-parsed-path uri)
+                                                                       :query (puri:uri-query uri)
+                                                                       :escaped t))
                                                     nil))
                                (string-upcase protocol))
               (write-header "Host" "~A~@[:~A~]" (puri:uri-host uri) (non-default-port uri))
@@ -818,13 +833,16 @@ PARAMETERS will not be used."
                                (unless (or want-stream (eq method :head))
                                  (let (trailers)
                                    (multiple-value-setq (body trailers)
-                                       (read-body http-stream headers external-format-body))
+                                     (read-body http-stream headers external-format-body
+                                                :decode-content decode-content))
                                    (when trailers
                                      (drakma-warn "Adding trailers from chunked encoding to HTTP headers.")
                                      (setq headers (nconc headers trailers)))))
                                (setq done t)
-                               (values (cond (want-stream (decode-flexi-stream headers http-stream))
-                                             (t body))
+                               (values (if want-stream
+                                           (decode-flexi-stream headers http-stream
+                                                                :decode-content decode-content)
+                                           body)
                                        status-code
                                        headers
                                        uri
