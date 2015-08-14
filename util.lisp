@@ -220,20 +220,11 @@ one to twelve."
   "Tries to interpret STRING as a time zone abbreviation which can
 either be something like \"PST\" or \"GMT\" with an offset like
 \"GMT-02:00\"."
-  (when-let (zone (cdr (assoc string *time-zone-map* :test #'string=)))
-    (return-from interpret-as-time-zone zone))
-  (unless (and (= (length string) 9)
-               (starts-with-p string "GMT")
-               (find (char string 3) "+-" :test #'char=)
-               (char= (char string 6) #\:)
-               (every (lambda (pos)
-                        (digit-char-p (char string pos)))
-                      '(4 5 7 8)))
-    (cookie-date-parse-error "Can't interpret ~S as a time zone." string))
-  (let ((hours (parse-integer string :start 4 :end 6))
-        (minutes (parse-integer string :start 7 :end 9)))
-    (* (if (char= (char string 3) #\+) -1 1)
-       (+ hours (/ minutes 60)))))
+  (or (cdr (assoc string *time-zone-map* :test #'string=))
+      (cl-ppcre:register-groups-bind (sign hours minutes) ("(?:GMT|)\\s*([+-]?)(\\d\\d):?(\\d\\d)" string)
+        (* (if (equal sign "-") 1 -1)
+           (+ (parse-integer hours) (/ (parse-integer minutes) 60))))
+      (cookie-date-parse-error "Can't interpret ~S as a time zone." string)))
 
 (defun set-referer (referer-uri &optional alist)
   "Returns a fresh copy of the HTTP header list ALIST with the
@@ -305,10 +296,11 @@ which are not meant as separators."
          (go next-cookie))))))
 
 #-:lispworks
-(defun make-ssl-stream (http-stream &key certificate key certificate-password verify (max-depth 10) ca-file ca-directory hostname)
+(defun make-ssl-stream (http-stream &key certificate key certificate-password verify (max-depth 10) ca-file ca-directory
+                                         hostname)
   "Attaches SSL to the stream HTTP-STREAM and returns the SSL stream
 \(which will not be equal to HTTP-STREAM)."
-  (declare (ignorable http-stream certificate-password max-depth ca-directory))
+  (declare (ignorable http-stream certificate-password max-depth ca-directory hostname))
   (check-type verify (member nil :optional :required))
   (when (and certificate
              (not (probe-file certificate)))
@@ -339,6 +331,7 @@ which are not meant as separators."
       (warn ":verify, :max-depth, :ca-file and :ca-directory arguments not available on this platform"))
     (cl+ssl:make-ssl-client-stream
      (cl+ssl:stream-fd s)
+     :hostname hostname
      :close-callback (lambda () (close s))
      :certificate certificate
      :key key

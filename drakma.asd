@@ -41,7 +41,7 @@
 (defsystem :drakma
   :description "Full-featured http/https client based on usocket"
   :serial t
-  :version "1.3.14"
+  :version "2.0.1"
   :components ((:file "packages")
                (:file "specials")
                (:file "conditions")
@@ -58,4 +58,7 @@
                :ia-hash-table
                #-:drakma-no-chipz :chipz
                #-:lispworks :usocket
-               #-(or :lispworks :allegro :mocl-ssl :drakma-no-ssl) :cl+ssl))
+               #-(or :lispworks :allegro :mocl-ssl :drakma-no-ssl) :cl+ssl)
+  :perform (test-op (o s)
+                    (asdf:load-system :drakma-test)
+                    (asdf:perform 'asdf:test-op :drakma-test)))
